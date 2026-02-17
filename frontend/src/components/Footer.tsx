@@ -6,7 +6,7 @@ export default function Footer() {
   const pathname = usePathname();
 
   // Nascondiamo il footer nelle app-view o nelle pagine di auth per un look più pulito
-  if (pathname === '/signin' || pathname === '/signup' || pathname === '/dashboard') return null;
+  if (pathname === '/signin' || pathname === '/signup' || pathname === '/dashboard' || pathname === '/forgot-password' || pathname === '/reset-password') return null;
 
   return (
     <footer className="bg-white dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 py-12 transition-colors duration-300">

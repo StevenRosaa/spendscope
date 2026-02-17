@@ -5,6 +5,7 @@ import "./globals.css";
 import { AuthProvider } from "@/contexts/AuthContext";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import { ThemeProvider } from "@/components/ThemeProvider";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -19,18 +20,18 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${inter.className} bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-50 antialiased`}>
-        <AuthProvider>
-          <Header />
-          {/* Aggiungiamo un padding superiore per compensare l'Header fisso */}
-          <div className="min-h-screen flex flex-col">
-            <main className="flex-grow">
+    <html lang="en" suppressHydrationWarning> 
+      <body className={`${inter.className} bg-slate-50 dark:bg-slate-950 antialiased transition-colors duration-300`}>
+        {/* Avvolgi tutto nel ThemeProvider */}
+        <ThemeProvider> 
+          <AuthProvider>
+            <Header />
+            <div className="flex flex-col min-h-screen">
               {children}
-            </main>
-          </div>
-          <Footer />
-        </AuthProvider>
+            </div>
+            <Footer />
+          </AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

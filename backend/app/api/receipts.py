@@ -12,6 +12,9 @@ import os
 from fastapi import HTTPException
 from app.api.auth import get_current_user # Importiamo il buttafuori
 from app.db.models import User
+import csv
+import io
+from fastapi.responses import StreamingResponse
 
 router = APIRouter(prefix="/receipts", tags=["Receipts"])
 
@@ -146,3 +149,39 @@ async def get_receipt_download_url(receipt_id: int, db: AsyncSession = Depends(g
     )
     
     return {"url": presigned_url}
+
+@router.get("/export")
+async def export_receipts_csv(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Genera e scarica un file CSV con tutti gli scontrini dell'utente."""
+    
+    # 1. Usiamo receipt_date per ordinare!
+    query = select(Receipt).where(Receipt.user_id == current_user.id).order_by(Receipt.receipt_date.desc())
+    result = await db.execute(query)
+    receipts = result.scalars().all()
+
+    stream = io.StringIO()
+    writer = csv.writer(stream)
+
+    # 2. Aggiorniamo le intestazioni per il file Excel
+    writer.writerow(["ID", "Store Name", "Date", "Total Amount", "Status", "Uploaded At"])
+
+    # 3. Usiamo le proprietà ESATTE del tuo database
+    for r in receipts:
+        writer.writerow([
+            r.id,
+            r.store_name or "N/A",
+            r.receipt_date.strftime("%Y-%m-%d") if r.receipt_date else "N/A",
+            f"{r.total_amount:.2f}" if r.total_amount else "0.00",
+            r.status or "N/A", # Usiamo status dato che category non esiste nello schema
+            r.created_at.strftime("%Y-%m-%d %H:%M:%S") if r.created_at else "N/A"
+        ])
+
+    stream.seek(0)
+
+    response = StreamingResponse(iter([stream.getvalue()]), media_type="text/csv")
+    response.headers["Content-Disposition"] = "attachment; filename=spendscope_export.csv"
+    
+    return response

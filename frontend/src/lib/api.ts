@@ -1,36 +1,55 @@
+// frontend/src/lib/api.ts
 import axios from 'axios';
 
-// The URL of your FastAPI backend (e.g., hosted on Render)
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-
 export const apiClient = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  // RIMOSSO IL /api FINALE QUI:
+  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000',
 });
 
-// Intercept requests to attach the JWT token
 apiClient.interceptors.request.use((config) => {
-  // In a real production app, consider using HTTP-only cookies instead of localStorage
-  // for better security against XSS attacks.
-  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-  
+  const token = localStorage.getItem('access_token');
   if (token && config.headers) {
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
-}, (error) => {
-  return Promise.reject(error);
 });
 
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.clear();
-      window.location.href = '/signin';
+  async (error) => {
+    const originalRequest = error.config;
+
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true;
+      
+      const refreshToken = localStorage.getItem('refresh_token');
+      
+      if (refreshToken) {
+        try {
+          // RIMOSSO IL /api FINALE ANCHE QUI:
+          const res = await axios.post(
+            `${process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000'}/auth/refresh`, 
+            { refresh_token: refreshToken }
+          );
+          
+          const newAccessToken = res.data.access_token;
+          localStorage.setItem('access_token', newAccessToken);
+          originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+          
+          return apiClient(originalRequest);
+        } catch (refreshError) {
+          console.warn("Session revoked or expired. Logging out.");
+          localStorage.removeItem('access_token');
+          localStorage.removeItem('refresh_token');
+          window.location.href = '/signin';
+          return Promise.reject(refreshError);
+        }
+      } else {
+        localStorage.removeItem('access_token');
+        window.location.href = '/signin';
+      }
     }
+    
     return Promise.reject(error);
   }
 );

@@ -4,34 +4,68 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { apiClient } from '@/lib/api';
 
+// Definiamo come è fatto il nostro utente
+export interface User {
+  id: number;
+  email: string;
+  full_name: string | null;
+}
+
 interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
+  user: User | null; // <-- Aggiungiamo l'utente!
   logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
   isAuthenticated: false,
   isLoading: true,
+  user: null,
   logout: async () => {},
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [user, setUser] = useState<User | null>(null);
   const router = useRouter();
   const pathname = usePathname();
 
   useEffect(() => {
-    // Controlla se c'è un token al caricamento o quando cambia la pagina
-    const token = localStorage.getItem('access_token');
-    setIsAuthenticated(!!token);
-    setIsLoading(false);
-  }, [pathname]); // Si riattiva se l'utente naviga
+    const fetchUser = async () => {
+      const token = localStorage.getItem('access_token');
+      if (!token) {
+        setIsAuthenticated(false);
+        setUser(null);
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        // Chiediamo al backend chi siamo
+        const response = await apiClient.get('/auth/me');
+        setUser(response.data);
+        setIsAuthenticated(true);
+      } catch (error) {
+        console.error("Token non valido o scaduto", error);
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        setIsAuthenticated(false);
+        setUser(null);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchUser();
+  }, [pathname]);
 
   const logout = async () => {
     try {
       const refreshToken = localStorage.getItem('refresh_token');
+      setIsAuthenticated(false);
+      setUser(null); // Resettiamo l'utente
       if (refreshToken) {
         await apiClient.post('/auth/logout', { refresh_token: refreshToken });
       }
@@ -40,13 +74,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       localStorage.removeItem('access_token');
       localStorage.removeItem('refresh_token');
-      setIsAuthenticated(false);
       router.push('/signin');
     }
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, isLoading, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated, isLoading, user, logout }}>
       {children}
     </AuthContext.Provider>
   );
