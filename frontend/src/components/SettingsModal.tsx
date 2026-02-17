@@ -19,33 +19,37 @@ interface SettingsModalProps {
 type TabType = 'profile' | 'preferences' | 'security' | 'billing' | 'danger';
 
 export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const { theme, setTheme } = useTheme();
   const [activeTab, setActiveTab] = useState<TabType>('profile');
+  
+  // Stati per le varie azioni
   const [isLoggingOutDevices, setIsLoggingOutDevices] = useState(false);
   const [logoutDevicesSuccess, setLogoutDevicesSuccess] = useState(false);
-  const [isExporting, setIsExporting] = useState(false)
+  const [isExporting, setIsExporting] = useState(false);
+  
+  // NUOVI STATI: Password Reset & Delete Account
+  const [isRequestingPassword, setIsRequestingPassword] = useState(false);
+  const [passwordRequestSuccess, setPasswordRequestSuccess] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   if (!isOpen || !user) return null;
 
-  // --- MENU DELLA SIDEBAR ---
   const tabs: { id: TabType; label: string; icon: LucideIcon; isDanger?: boolean }[] = [
     { id: 'profile', label: 'Profile', icon: UserIcon },
     { id: 'preferences', label: 'Preferences', icon: Palette },
     { id: 'security', label: 'Security', icon: Shield },
     { id: 'billing', label: 'Billing', icon: CreditCard },
     { id: 'danger', label: 'Danger Zone', icon: AlertTriangle, isDanger: true },
-  ] as const;
+  ];
 
   const handleLogoutOtherDevices = async () => {
     setIsLoggingOutDevices(true);
     try {
       const refreshToken = localStorage.getItem('refresh_token');
-      // Importa apiClient in cima al file se non c'è: import { apiClient } from '@/lib/api';
       await apiClient.post('/auth/logout-other-devices', { refresh_token: refreshToken });
-      
       setLogoutDevicesSuccess(true);
-      // Rimettiamo il bottone normale dopo 3 secondi
       setTimeout(() => setLogoutDevicesSuccess(false), 3000); 
     } catch (error) {
       console.error("Failed to logout other devices", error);
@@ -57,21 +61,14 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const handleExportData = async () => {
     setIsExporting(true);
     try {
-      // Il trucco è { responseType: 'blob' }, dice ad Axios di non provare a leggere il file come JSON
       const response = await apiClient.get('/receipts/export', { responseType: 'blob' });
-      
-      // 1. Creiamo un oggetto URL dal file binario ricevuto
       const blob = new Blob([response.data], { type: 'text/csv' });
       const url = window.URL.createObjectURL(blob);
-      
-      // 2. Creiamo un link invisibile e lo clicchiamo con JavaScript
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', 'spendscope_export.csv'); // Il nome del file
+      link.setAttribute('download', 'spendscope_export.csv');
       document.body.appendChild(link);
       link.click();
-      
-      // 3. Puliamo la memoria
       link.parentNode?.removeChild(link);
       window.URL.revokeObjectURL(url);
     } catch (error) {
@@ -82,7 +79,33 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     }
   };
 
-  // --- CONTENUTO DELLE SEZIONI ---
+  const handlePasswordReset = async () => {
+    setIsRequestingPassword(true);
+    try {
+      await apiClient.post('/auth/forgot-password', { email: user.email });
+      setPasswordRequestSuccess(true);
+      setTimeout(() => setPasswordRequestSuccess(false), 5000);
+    } catch (error) {
+      console.error("Failed to request password reset", error);
+    } finally {
+      setIsRequestingPassword(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    setIsDeleting(true);
+    try {
+      await apiClient.delete('/auth/me'); 
+      onClose();
+      logout();
+    } catch (error) {
+      console.error("Failed to delete account", error);
+      alert("Failed to delete account. Please try again.");
+      setIsDeleting(false);
+      setShowDeleteConfirm(false);
+    }
+  };
+
   const renderTabContent = () => {
     switch (activeTab) {
       case 'profile':
@@ -149,11 +172,11 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
               <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/50 flex items-center justify-between opacity-60 pointer-events-none">
                 <div>
-                  <h4 className="font-semibold text-slate-900 dark:text-white">Currency</h4>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">Default currency for expenses (Coming soon).</p>
+                  <h4 className="font-semibold text-slate-900 dark:text-white">Default Currency</h4>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">Multi-currency wallets coming soon.</p>
                 </div>
                 <div className="px-4 py-2 bg-slate-100 dark:bg-slate-950 rounded-lg text-sm font-semibold">
-                  USD ($)
+                  Auto-Detect
                 </div>
               </div>
             </div>
@@ -166,22 +189,32 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Security Settings</h3>
             
             <div className="space-y-4">
-              <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/50 flex items-center justify-between">
+              <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div className="flex items-center space-x-3">
-                  <div className="p-2 bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 rounded-lg"><KeyRound className="w-5 h-5" /></div>
+                  <div className="p-2 bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 rounded-lg shrink-0"><KeyRound className="w-5 h-5" /></div>
                   <div>
                     <h4 className="font-semibold text-slate-900 dark:text-white">Change Password</h4>
                     <p className="text-sm text-slate-500 dark:text-slate-400">Receive an email to reset your password.</p>
                   </div>
                 </div>
-                <button className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-sm font-semibold rounded-xl transition-colors">
-                  Request Link
+                
+                <button 
+                  onClick={handlePasswordReset}
+                  disabled={isRequestingPassword || passwordRequestSuccess}
+                  className={`w-full sm:w-auto px-4 py-2 text-sm font-semibold rounded-xl transition-colors ${
+                    passwordRequestSuccess 
+                      ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400' 
+                      : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
+                  }`}
+                >
+                  {isRequestingPassword ? <Loader2 className="w-4 h-4 mx-auto animate-spin" /> : 
+                   passwordRequestSuccess ? <div className="flex items-center"><Check className="w-4 h-4 mr-1"/> Sent</div> : 'Request Link'}
                 </button>
               </div>
 
-              <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/50 flex items-center justify-between">
+              <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div className="flex items-center space-x-3">
-                  <div className="p-2 bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded-lg"><MonitorSmartphone className="w-5 h-5" /></div>
+                  <div className="p-2 bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded-lg shrink-0"><MonitorSmartphone className="w-5 h-5" /></div>
                   <div>
                     <h4 className="font-semibold text-slate-900 dark:text-white">Device Management</h4>
                     <p className="text-sm text-slate-500 dark:text-slate-400">Log out from all other active sessions.</p>
@@ -190,7 +223,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <button 
                   onClick={handleLogoutOtherDevices}
                   disabled={isLoggingOutDevices || logoutDevicesSuccess}
-                  className={`flex items-center px-4 py-2 text-sm font-semibold rounded-xl transition-all duration-300 ${
+                  className={`w-full sm:w-auto flex items-center justify-center px-4 py-2 text-sm font-semibold rounded-xl transition-all duration-300 ${
                     logoutDevicesSuccess 
                       ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400' 
                       : 'bg-amber-100/50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/40'
@@ -199,7 +232,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   {isLoggingOutDevices ? (
                     <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Processing...</>
                   ) : logoutDevicesSuccess ? (
-                    <><Check className="w-4 h-4 mr-2" /> All Devices Logged Out</>
+                    <><Check className="w-4 h-4 mr-2" /> Logged Out</>
                   ) : (
                     'Log out devices'
                   )}
@@ -231,7 +264,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             <h3 className="text-lg font-bold text-red-600 dark:text-red-400 mb-4">Danger Zone</h3>
             
             <div className="space-y-4">
-              <div className="p-4 rounded-2xl border border-red-200 dark:border-red-900/30 bg-red-50/50 dark:bg-red-900/10 flex items-center justify-between">
+              <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div>
                   <h4 className="font-semibold text-slate-900 dark:text-white">Export Data</h4>
                   <p className="text-sm text-slate-500 dark:text-slate-400">Download all your receipts and data as CSV.</p>
@@ -239,21 +272,44 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <button 
                   onClick={handleExportData}
                   disabled={isExporting}
-                  className="flex items-center px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-sm font-semibold rounded-xl transition-colors disabled:opacity-50"
+                  className="w-full sm:w-auto flex items-center justify-center px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-sm font-semibold rounded-xl transition-colors disabled:opacity-50"
                 >
                   {isExporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin text-slate-500" /> : <Download className="w-4 h-4 mr-2" />}
                   {isExporting ? 'Exporting...' : 'Export'}
                 </button>
               </div>
 
-              <div className="p-4 rounded-2xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 flex items-center justify-between">
+              <div className="p-4 rounded-2xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div>
                   <h4 className="font-semibold text-red-900 dark:text-red-200">Delete Account</h4>
                   <p className="text-sm text-red-600/80 dark:text-red-400/80">Permanently remove your account and all data.</p>
                 </div>
-                <button className="flex items-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl transition-colors shadow-md shadow-red-500/20">
-                  <Trash2 className="w-4 h-4 mr-2" /> Delete
-                </button>
+                
+                {showDeleteConfirm ? (
+                  <div className="flex w-full sm:w-auto items-center space-x-2">
+                    <button 
+                      onClick={() => setShowDeleteConfirm(false)}
+                      disabled={isDeleting}
+                      className="px-3 py-2 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-sm font-semibold rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button 
+                      onClick={handleDeleteAccount}
+                      disabled={isDeleting}
+                      className="flex-1 sm:flex-none flex justify-center items-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl transition-colors shadow-md shadow-red-500/20 disabled:opacity-50"
+                    >
+                      {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm'}
+                    </button>
+                  </div>
+                ) : (
+                  <button 
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="w-full sm:w-auto flex items-center justify-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl transition-colors shadow-md shadow-red-500/20"
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" /> Delete
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -266,77 +322,71 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6">
-        {/* Backdrop */}
-        <motion.div
-          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-          onClick={onClose}
-          className="absolute inset-0 bg-slate-900/40 dark:bg-slate-950/70 backdrop-blur-sm"
-        />
-
-        {/* Modal Container */}
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95, y: 20 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.95, y: 20 }}
-          className="relative w-full max-w-4xl h-[600px] max-h-[90vh] bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col md:flex-row overflow-hidden"
-        >
-          {/* Close Button (Absolute for mobile/desktop) */}
-          <button
+      {isOpen && user && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 pointer-events-none">
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             onClick={onClose}
-            className="absolute top-4 right-4 z-10 p-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 rounded-full transition-colors"
+            className="absolute inset-0 bg-slate-900/40 dark:bg-slate-950/70 backdrop-blur-sm pointer-events-auto"
+          />
+
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            className="relative w-full max-w-4xl h-[600px] max-h-[90vh] bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col md:flex-row overflow-hidden pointer-events-auto"
           >
-            <X className="w-5 h-5" />
-          </button>
+            <button
+              onClick={onClose}
+              className="absolute top-4 right-4 z-10 p-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 rounded-full transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
 
-          {/* SIDEBAR (Navigazione) */}
-          <div className="w-full md:w-64 bg-slate-50/50 dark:bg-slate-950/50 border-b md:border-b-0 md:border-r border-slate-200 dark:border-slate-800 p-6 flex flex-row md:flex-col gap-2 overflow-x-auto no-scrollbar shrink-0">
-            <h2 className="hidden md:block text-xs font-bold uppercase tracking-wider text-slate-400 mb-4 px-2">Settings</h2>
-            
-            {tabs.map((tab) => {
-              const Icon = tab.icon;
-              const isActive = activeTab === tab.id;
+            <div className="w-full md:w-64 bg-slate-50/50 dark:bg-slate-950/50 border-b md:border-b-0 md:border-r border-slate-200 dark:border-slate-800 p-6 flex flex-row md:flex-col gap-2 overflow-x-auto custom-scrollbar shrink-0">
+              <h2 className="hidden md:block text-xs font-bold uppercase tracking-wider text-slate-400 mb-4 px-2">Settings</h2>
               
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center flex-shrink-0 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 group ${
-                    isActive 
-                      ? tab.isDanger 
-                        ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400' 
-                        : 'bg-white dark:bg-slate-800 text-violet-600 dark:text-violet-400 shadow-sm border border-slate-200/50 dark:border-slate-700/50'
-                      : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-                >
-                  <Icon className={`w-5 h-5 mr-3 transition-colors ${
-                    isActive 
-                      ? tab.isDanger ? 'text-red-600 dark:text-red-400' : 'text-violet-600 dark:text-violet-400'
-                      : 'text-slate-400 group-hover:text-slate-500 dark:group-hover:text-slate-300'
-                  }`} />
-                  {tab.label}
-                </button>
-              );
-            })}
-          </div>
+              {tabs.map((tab) => {
+                const Icon = tab.icon;
+                const isActive = activeTab === tab.id;
+                
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`flex items-center flex-shrink-0 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 group ${
+                      isActive 
+                        ? tab.isDanger 
+                          ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400' 
+                          : 'bg-white dark:bg-slate-800 text-violet-600 dark:text-violet-400 shadow-sm border border-slate-200/50 dark:border-slate-700/50'
+                        : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    <Icon className={`w-5 h-5 mr-3 transition-colors ${
+                      isActive 
+                        ? tab.isDanger ? 'text-red-600 dark:text-red-400' : 'text-violet-600 dark:text-violet-400'
+                        : 'text-slate-400 group-hover:text-slate-500 dark:group-hover:text-slate-300'
+                    }`} />
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
 
-          {/* CONTENT AREA (Destra) */}
-          <div className="flex-1 p-6 md:p-10 overflow-y-auto bg-white dark:bg-slate-900 relative">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={activeTab}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.2 }}
-                className="h-full"
-              >
-                {renderTabContent()}
-              </motion.div>
-            </AnimatePresence>
-          </div>
-        </motion.div>
-      </div>
+            <div className="flex-1 p-6 md:p-10 overflow-y-auto custom-scrollbar bg-white dark:bg-slate-900 relative">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={activeTab}
+                  initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}
+                  className="h-full"
+                >
+                  {renderTabContent()}
+                </motion.div>
+              </AnimatePresence>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </AnimatePresence>
   );
 }

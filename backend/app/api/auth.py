@@ -6,7 +6,7 @@ import os
 import jwt
 from pydantic import BaseModel
 from app.db.database import get_db_session
-from app.db.models import User, UserSession
+from app.db.models import User, UserSession, Receipt
 from app.schemas.user import UserCreate, UserResponse, TokenResponse
 from app.core.security import get_password_hash, verify_password, create_access_token, create_refresh_token
 from app.core.limiter import limiter
@@ -261,3 +261,46 @@ async def refresh_access_token(
     new_access_token = create_access_token(subject=session.user_id, session_id=session.id)
     
     return {"access_token": new_access_token, "token_type": "bearer"}
+
+@router.delete("/me")
+async def delete_my_account(
+    current_user: User = Depends(get_current_user), 
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Elimina permanentemente l'utente, tutti i suoi scontrini, gli item e le sessioni attive.
+    """
+    # SALVATAGGIO SICURO: Salviamo l'ID prima di interagire con il DB
+    # Questo previene l'errore 'MissingGreenlet' in caso di rollback!
+    safe_user_id = current_user.id 
+
+    try:
+        # 1. Eliminiamo tutti gli scontrini dell'utente
+        receipts_query = select(Receipt).where(Receipt.user_id == safe_user_id)
+        result = await db.execute(receipts_query)
+        receipts = result.scalars().all()
+        
+        for receipt in receipts:
+            await db.delete(receipt)
+            
+        # 2. Eliminiamo tutte le sessioni attive dell'utente
+        sessions_query = select(UserSession).where(UserSession.user_id == safe_user_id)
+        sess_result = await db.execute(sessions_query)
+        sessions = sess_result.scalars().all()
+        
+        for session in sessions:
+            await db.delete(session)
+            
+        # 3. Infine, eliminiamo l'utente stesso
+        await db.delete(current_user)
+        
+        # Confermiamo le modifiche al database
+        await db.commit()
+        
+        return {"message": "Account and all associated data permanently deleted."}
+        
+    except Exception as e:
+        await db.rollback() # Se qualcosa va storto, annulliamo
+        # Usiamo safe_user_id che è un semplice numero (int), quindi niente crash!
+        print(f"Error deleting user {safe_user_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to delete account. Please try again.")

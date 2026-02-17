@@ -57,10 +57,14 @@ class Receipt(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="users.id", nullable=False)
     
-    # Extracted metadata (can be null until OCR completes)
+    # Extracted metadata
     store_name: Optional[str] = Field(default=None)
     receipt_date: Optional[datetime] = Field(default=None)
     total_amount: float = Field(default=0.0)
+    
+    # --- NUOVI CAMPI MULTI-VALUTA E GEOLOCALIZZAZIONE ---
+    currency: str = Field(default="USD") # Codice ISO (es: USD, EUR, GBP)
+    country: Optional[str] = Field(default=None) # Es: Italy, United Kingdom, USA
     
     # Cloud Storage reference
     file_url: str = Field(nullable=False) 
@@ -71,12 +75,10 @@ class Receipt(SQLModel, table=True):
     
     # Relationships
     user: User = Relationship(back_populates="receipts")
-    # cascade="all, delete-orphan" ensures items are deleted if the receipt is deleted
     items: List["ExpenseItem"] = Relationship(
         back_populates="receipt", 
         sa_relationship_kwargs={"cascade": "all, delete-orphan"}
     )
-
 
 class ExpenseItem(SQLModel, table=True):
     __tablename__ = "expense_items"
