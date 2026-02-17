@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+sqlmodel
+asyncpg       # Async PostgreSQL driver
+python-dotenv # To load .env variables
+alembic       # For database migrations
+passlib[bcrypt]    # For password hashing
+PyJWT              # For generating and verifying JSON Web Tokens
+python-multipart   # Required by FastAPI for form data (OAuth2 login)
+boto3  # AWS SDK for Python (works perfectly with Cloudflare R2, Supabase Storage, etc.)
+greenlet
+email-validator
+passlib
+bcrypt==3.2.2
