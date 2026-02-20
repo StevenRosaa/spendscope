@@ -1,80 +1,106 @@
-import io
-import csv
-from fastapi import APIRouter, Depends
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, Query
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select, func
+from datetime import date
+from pydantic import BaseModel
+from typing import List
 
+# Importiamo la TUA sessione e i TUOI modelli
 from app.db.database import get_db_session
-from app.db.models import ExpenseItem, Receipt, ReceiptStatus
+from app.db.models import Receipt, User
 
-router = APIRouter(prefix="/analytics", tags=["Analytics"])
+# NOTA: Assumo che tu abbia una funzione per ottenere l'utente corrente dal token.
+# Se si trova da un'altra parte, correggi questo import (es. from app.core.security import get_current_user)
+# from app.api.deps import get_current_user 
 
-@router.get("/summary")
-async def get_expense_summary(db: AsyncSession = Depends(get_db_session)):
-    """
-    Returns total expenses grouped by category.
-    Ideal for populating a pie chart in the frontend dashboard.
-    """
-    # HARDCODED for this example (Replace with current_user.id from Auth)
+router = APIRouter(prefix="/api/analytics", tags=["Analytics"])
+
+# --- 1. Schemi di Risposta ---
+class ChartDataPoint(BaseModel):
+    label: str
+    value: float
+
+class CategoryDataPoint(ChartDataPoint):
+    percentage: float
+
+class AnalyticsResponse(BaseModel):
+    total_spent: float
+    spending_over_time: List[ChartDataPoint]
+    top_categories: List[CategoryDataPoint]
+
+# --- 2. Endpoint ---
+@router.get("/", response_model=AnalyticsResponse)
+async def get_analytics(
+    start_date: date = Query(..., description="Inizio del range (YYYY-MM-DD)"),
+    end_date: date = Query(..., description="Fine del range (YYYY-MM-DD)"),
+    session: AsyncSession = Depends(get_db_session),
+    # current_user: User = Depends(get_current_user) # Scommenta quando hai la dipendenza di auth!
+):
+    # TEMPORANEO: finché non scommenti get_current_user, simuliamo l'utente 1
+    # Quando sblocchi auth, usa: user_id = current_user.id
     user_id = 1 
-    
-    # Query: SELECT category, SUM(amount) FROM expense_items 
-    # JOIN receipts ON ... WHERE user_id = 1 AND status = 'completed' GROUP BY category
-    query = (
-        select(ExpenseItem.category, func.sum(ExpenseItem.amount).label("total_spent"))
-        .join(Receipt)
-        .where(Receipt.user_id == user_id)
-        .where(Receipt.status == ReceiptStatus.COMPLETED)
-        .group_by(ExpenseItem.category)
-    )
-    
-    result = await db.execute(query)
-    
-    # Format the result into a clean dictionary or list of objects
-    summary = [{"category": row[0], "total": float(row[1])} for row in result.all()]
-    
-    return {"data": summary}
 
+    # Filtri base per SQLModel
+    # NOTA SUI NOMI DEI CAMPI: 
+    # Sto assumendo che il tuo modello Receipt abbia i campi: `date`, `total` e `category`.
+    # Se il totale si chiama in un altro modo (es. `amount` o `total_amount`), cambialo qui sotto.
+    base_filters = [
+        Receipt.user_id == user_id,
+        func.date(Receipt.date) >= start_date,
+        func.date(Receipt.date) <= end_date
+    ]
 
-@router.get("/export/csv")
-async def export_expenses_csv(db: AsyncSession = Depends(get_db_session)):
-    """
-    Generates a CSV file of all expense items on the fly and streams it to the user.
-    """
-    user_id = 1 
-    
-    # Fetch all items linked to the user's completed receipts
-    query = (
-        select(Receipt.store_name, Receipt.receipt_date, ExpenseItem.description, ExpenseItem.category, ExpenseItem.amount)
-        .join(ExpenseItem)
-        .where(Receipt.user_id == user_id)
-        .where(Receipt.status == ReceiptStatus.COMPLETED)
-        .order_by(Receipt.receipt_date.desc())
+    # --- Query 1: Totale Speso ---
+    total_query = select(func.sum(Receipt.total)).where(*base_filters)
+    result_total = await session.execute(total_query)
+    total_spent = result_total.scalar() or 0.0
+
+    # --- Query 2: Andamento nel tempo (BarChart) ---
+    time_query = (
+        select(
+            func.date(Receipt.date).label("day"),
+            func.sum(Receipt.total).label("daily_total")
+        )
+        .where(*base_filters)
+        .group_by(func.date(Receipt.date))
+        .order_by("day")
     )
+    result_time = await session.execute(time_query)
+    time_results = result_time.all()
     
-    result = await db.execute(query)
-    rows = result.all()
-    
-    # Create an in-memory string buffer
-    stream = io.StringIO()
-    csv_writer = csv.writer(stream)
-    
-    # Write CSV Header
-    csv_writer.writerow(["Store Name", "Date", "Item Description", "Category", "Amount ($)"])
-    
-    # Write data rows
-    for row in rows:
-        store_name, receipt_date, description, category, amount = row
-        # Format date nicely if it exists
-        date_str = receipt_date.strftime("%Y-%m-%d") if receipt_date else "N/A"
-        csv_writer.writerow([store_name, date_str, description, category, f"{amount:.2f}"])
-        
-    # Reset stream cursor to the beginning before sending
-    stream.seek(0)
-    
-    # Stream the response directly to the client browser
-    response = StreamingResponse(iter([stream.getvalue()]), media_type="text/csv")
-    response.headers["Content-Disposition"] = "attachment; filename=spendscope_report.csv"
-    
-    return response
+    spending_over_time = [
+        ChartDataPoint(label=str(row.day), value=float(row.daily_total))
+        for row in time_results
+    ]
+
+    # --- Query 3: Categorie Top ---
+    cat_query = (
+        select(
+            Receipt.category,
+            func.sum(Receipt.total).label("cat_total")
+        )
+        .where(*base_filters)
+        .group_by(Receipt.category)
+        .order_by(func.sum(Receipt.total).desc())
+        .limit(5)
+    )
+    result_cat = await session.execute(cat_query)
+    cat_results = result_cat.all()
+
+    top_categories = []
+    for row in cat_results:
+        cat_total = float(row.cat_total)
+        perc = (cat_total / float(total_spent) * 100) if total_spent > 0 else 0
+        top_categories.append(
+            CategoryDataPoint(
+                label=row.category or "Uncategorized", 
+                value=cat_total, 
+                percentage=round(perc, 1)
+            )
+        )
+
+    return AnalyticsResponse(
+        total_spent=round(float(total_spent), 2),
+        spending_over_time=spending_over_time,
+        top_categories=top_categories
+    )

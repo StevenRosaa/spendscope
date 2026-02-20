@@ -97,7 +97,7 @@ export default function Header() {
                   <Link href="/ai-insights" className={`flex items-center px-3 py-2 rounded-xl text-sm font-semibold transition-colors group ${pathname === '/ai-insights' ? 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400' : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'}`}>
                     <Sparkles className={`w-4 h-4 mr-2 transition-transform ${pathname !== '/ai-insights' && 'group-hover:rotate-12 group-hover:text-indigo-500'}`} /> 
                     AI Insights
-                    <span className="ml-2 px-1.5 py-0.5 text-[10px] uppercase font-bold bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 rounded-md">Soon</span>
+                    <span className="ml-2 px-1.5 py-0.5 text-[10px] uppercase font-bold bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 rounded-md">BETA</span>
                   </Link>
                 </div>
 

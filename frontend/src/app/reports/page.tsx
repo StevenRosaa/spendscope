@@ -1,16 +1,32 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
-import { BarChart3, Download, Calendar, ArrowUpRight, Loader2 } from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
+import { useState } from 'react';
+import { Download } from 'lucide-react';
+import DateRangePicker from '@/components/reports/DataRangePicker';
+import SpendingOverview from '@/components/reports/SpendingOverview';
+import TopCategories from '@/components/reports/TopCategories';
+import { useAnalytics } from '@/hooks/useAnalytics';
+import { DateRange } from '@/types';
+
+// Helper per formattare la data per l'API (YYYY-MM-DD) locale
+const toLocalISODate = (date: Date) => {
+  const offset = date.getTimezoneOffset();
+  const adjusted = new Date(date.getTime() - (offset * 60 * 1000));
+  return adjusted.toISOString().split('T')[0];
+};
 
 export default function ReportsPage() {
-  const { isAuthorized, isLoading } = useAuthGuard(); // Usa la tua logica di protezione rotta
+  // 1. Stato del filtro data
+  const [dateRange, setDateRange] = useState<DateRange>({
+    from: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+    to: new Date()
+  });
 
-  if (isLoading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-violet-600" /></div>;
-  if (!isAuthorized) return null;
+  // 2. Chiamata API tramite l'hook
+  const { data, isLoading, error } = useAnalytics(
+    toLocalISODate(dateRange.from),
+    toLocalISODate(dateRange.to)
+  );
 
   return (
     <div className="pt-28 min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-50 font-sans transition-colors duration-300">
@@ -23,10 +39,7 @@ export default function ReportsPage() {
           </div>
           
           <div className="flex gap-3">
-            <button className="flex items-center px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm font-semibold shadow-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
-              <Calendar className="w-4 h-4 mr-2 text-slate-400" />
-              This Month
-            </button>
+            <DateRangePicker dateRange={dateRange} onChange={setDateRange} />
             <button className="flex items-center px-4 py-2 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-xl text-sm font-semibold shadow-sm hover:opacity-90 transition-opacity">
               <Download className="w-4 h-4 mr-2" />
               Export PDF
@@ -34,61 +47,26 @@ export default function ReportsPage() {
           </div>
         </header>
 
-        {/* Skeleton dei Grafici (Placeholder per sviluppi futuri) */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-            className="lg:col-span-2 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm min-h-[400px] flex flex-col"
-          >
-            <div className="flex justify-between items-center mb-8">
-              <h3 className="font-bold text-lg">Spending Overview</h3>
-              <BarChart3 className="text-slate-400 w-5 h-5" />
-            </div>
-            <div className="flex-1 flex items-center justify-center border-2 border-dashed border-slate-100 dark:border-slate-800 rounded-2xl bg-slate-50/50 dark:bg-slate-950/50">
-              <div className="text-center">
-                <p className="text-slate-500 font-medium">Interactive Charts Coming Soon</p>
-                <p className="text-sm text-slate-400 mt-1">We are connecting the data to the visualizations.</p>
-              </div>
-            </div>
-          </motion.div>
+        {error && (
+          <div className="p-4 bg-red-50 dark:bg-red-900/20 text-red-600 rounded-xl border border-red-200 dark:border-red-800">
+            {error}
+          </div>
+        )}
 
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
-            className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm"
-          >
-            <h3 className="font-bold text-lg mb-6">Top Categories</h3>
-            <div className="space-y-4">
-              {['Food & Dining', 'Transportation', 'Software Subscriptions', 'Office Supplies'].map((cat, i) => (
-                <div key={cat} className="space-y-2">
-                  <div className="flex justify-between text-sm font-medium">
-                    <span>{cat}</span>
-                    <span className="flex items-center text-slate-500"><ArrowUpRight className="w-3 h-3 mr-1" /> {80 - (i * 15)}%</span>
-                  </div>
-                  <div className="h-2 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                    <div className="h-full bg-violet-500 rounded-full" style={{ width: `${80 - (i * 15)}%` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </motion.div>
+        {/* 3. Rendering dei moduli separati */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <SpendingOverview 
+            data={data?.spending_over_time} 
+            totalSpent={data?.total_spent} 
+            isLoading={isLoading} 
+          />
+          <TopCategories 
+            categories={data?.top_categories} 
+            isLoading={isLoading} 
+          />
         </div>
+
       </main>
     </div>
   );
-}
-
-// Hook di utilità (puoi metterlo in un file separato se preferisci)
-function useAuthGuard() {
-  const router = useRouter();
-  const [isAuthorized, setIsAuthorized] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    const token = localStorage.getItem('access_token');
-    if (!token) router.push('/signin');
-    else setIsAuthorized(true);
-    setIsLoading(false);
-  }, [router]);
-
-  return { isAuthorized, isLoading };
 }
